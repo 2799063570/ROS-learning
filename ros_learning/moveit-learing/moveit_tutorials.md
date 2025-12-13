@@ -282,6 +282,12 @@ planning_scene_interface.addCollisionObjects(collision_objects);
 
 **附着物路径规划**
 模拟机器人抓取目标物体，携带物体进行运动规划。数据类型与障碍物相似，值得注意的是往往附着物的参考坐标系是末端执行器，当然对于眼在手外的抓取以基坐标为参考坐标系也是非常合理的。
+值得注意的是`move_group_interface.attachObject(object_to_attach.id, "panda_hand", { "panda_leftfinger", "panda_rightfinger" });`：将一个原本静止的环境物体（Collision Object）“粘”在机器人身上，并允许它们之间发生接触。
+该函数主要实现两种功能：
+
+- 运动学绑定，将附着物变为机器人的一部分，跟随机器人进行路径规划，一块进行移动。
+- 修改碰撞检测规则，设置可以碰撞附着物的link列表，避免报错。
+ 
 ```cpp
 moveit_msgs::CollisionObject object_to_attach;
 object_to_attach.id = "cylinder1";
@@ -315,3 +321,120 @@ object_ids.push_back(collision_object.id);
 object_ids.push_back(object_to_attach.id);
 planning_scene_interface.removeCollisionObjects(object_ids);
 ```
+
+## moveit_commander
+
+moveit_commander 是一个python package，在以上的功能进行封装实现上提供了更简单的操作接口（运动规划、抓取放置和笛卡尔路径），需要运行的是moveit_commander功能包下的moveit_commander_cmdline.py程序。
+
+进入程序后，我们可以输入一些简单的指令来控制机器人移动。语言类似于MATLAB。
+```MATLAB
+use panda_arm # 指定运动规划组
+current # 获取当前状态
+rec c # 记录当前状态到变量c
+goal = c # 将变量c中的值赋值给goal
+goal[0] = 0.2 # 修改goal变量中的第一个值
+go goal # 直接plan&excute到goal
+
+# 或者分段 先规划后执行
+plan goal
+execute
+
+quit # 退出程序
+```
+
+## kinematics in MoveIt
+
+主要是通过RobotModel（静态模型，机器人各个关节连杆的位置关系）和RobotState（动态状态，关节角度、速度等）两个类来访问机器人的运动学。
+
+在创建RobotModel过程中，可以发现有很多的higher-level components可以返回一个指向RobotModel的指针。通过RobotModel，我们可以构建一个RobotState类，该类可以获取机器人的参数配置指针，通过该类实现对机器人状态的设置。
+
+```cpp
+// 借助于RobotModelLoader从参数服务器中获取机器人的模型
+robot_model_loader::RobotModelLoader robot_model_loader("robot_description");
+const moveit::core::RobotModelPtr& kinematic_model = robot_model_loader.getModel();     // 返回RobotModel指针
+
+moveit::core::RobotStatePtr kinematic_state(new moveit::core::RobotState(kinematic_model));
+kinematic_state->setToDefaultValues();
+// 获取执行规划组的指针
+const moveit::core::JointModelGroup* joint_model_group = kinematic_model->getJointModelGroup("panda_arm");
+
+const std::vector<std::string>& joint_names = joint_model_group->getVariableNames();
+
+std::vector<double> joint_values;
+// 获取关节值
+kinematic_state->copyJointGroupPositions(joint_model_group, joint_values);
+for (std::size_t i = 0; i < joint_names.size(); ++i)
+{
+  ROS_INFO("Joint %s: %f", joint_names[i].c_str(), joint_values[i]);
+}
+```
+
+设置角度，主要借助于`setJointGroupPositions`函数，但是该函数不会考虑角度是否越界，这时候需要`satisfiesBounds`来判断是否状态有效，同时可以使用`enforceBounds`函数强制将数据按回安全范围内。
+```cpp
+/* Set one joint in the Panda arm outside its joint limit */
+joint_values[0] = 5.57;
+kinematic_state->setJointGroupPositions(joint_model_group, joint_values);
+
+/* Check whether any joint is outside its joint limits */
+ROS_INFO_STREAM("Current state is " << (kinematic_state->satisfiesBounds() ? "valid" : "not valid"));
+
+/* Enforce the joint limits for this state and check again*/
+kinematic_state->enforceBounds();
+ROS_INFO_STREAM("Current state is " << (kinematic_state->satisfiesBounds() ? "valid" : "not valid"));
+```
+
+前向运动学，计算末端执行器的笛卡尔空间的值，
+```cpp
+kinematic_state->setToRandomPositions(joint_model_group);
+const Eigen::Isometry3d& end_effector_state = kinematic_state->getGlobalLinkTransform("panda_link8");
+
+/* Print end-effector pose. Remember that this is in the model frame */
+ROS_INFO_STREAM("Translation: \n" << end_effector_state.translation() << "\n");
+ROS_INFO_STREAM("Rotation: \n" << end_effector_state.rotation() << "\n");
+```
+
+逆向运动学，需要末端执行器的位姿基于计算的最大时间。
+```cpp
+double timeout = 0.1;
+bool found_ik = kinematic_state->setFromIK(joint_model_group, end_effector_state, timeout);
+if (found_ik)
+{
+  kinematic_state->copyJointGroupPositions(joint_model_group, joint_values);
+  for (std::size_t i = 0; i < joint_names.size(); ++i)
+  {
+    ROS_INFO("Joint %s: %f", joint_names[i].c_str(), joint_values[i]);
+  }
+}
+else
+{
+  ROS_INFO("Did not find IK solution");
+}
+```
+
+雅可比矩阵
+```cpp
+Eigen::Vector3d reference_point_position(0.0, 0.0, 0.0);
+Eigen::MatrixXd jacobian;
+kinematic_state->getJacobian(joint_model_group,kinematic_state->getLinkModel(joint_model_group->getLinkModelNames().back()), reference_point_position, jacobian);
+ROS_INFO_STREAM("Jacobian: \n" << jacobian << "\n");
+```
+
+launch文件
+
+- 导入机器人的URDF和SRDF文件
+- 将运动学求解器加载ROS参数服务器中
+
+```xml
+<launch>
+  <include file="$(find panda_moveit_config)/launch/planning_context.launch">
+    <arg name="load_robot_description" value="true"/>
+  </include>
+
+  <node name="robot_model_and_robot_state_tutorial"
+        pkg="moveit_tutorials"
+        type="robot_model_and_robot_state_tutorial"
+        respawn="false" output="screen">
+    <rosparam command="load"
+              file="$(find panda_moveit_config)/config/kinematics.yaml"/>
+  </node>
+</launch>
