@@ -103,7 +103,7 @@ visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to continue t
 
 ### 规划相关的操作
 
-**设置规划组、规划场景**
+#### **设置规划组、规划场景**
 ```cpp
 static const std::string PLANNING_GROUP = "panda_arm";
 moveit::planning_interface::MoveGroupInterface move_group_interface(PLANNING_GROUP);
@@ -342,7 +342,7 @@ execute
 quit # 退出程序
 ```
 
-## kinematics in MoveIt
+## kinematics in MoveIt 运动学求解
 
 主要是通过RobotModel（静态模型，机器人各个关节连杆的位置关系）和RobotState（动态状态，关节角度、速度等）两个类来访问机器人的运动学。
 
@@ -413,7 +413,7 @@ else
 
 雅可比矩阵
 ```cpp
-Eigen::Vector3d reference_point_position(0.0, 0.0, 0.0);
+Eigen::Vector3d reference_point_position(0.0, 0.0, 0.0);// 参考方向
 Eigen::MatrixXd jacobian;
 kinematic_state->getJacobian(joint_model_group,kinematic_state->getLinkModel(joint_model_group->getLinkModelNames().back()), reference_point_position, jacobian);
 ROS_INFO_STREAM("Jacobian: \n" << jacobian << "\n");
@@ -438,3 +438,205 @@ launch文件
               file="$(find panda_moveit_config)/config/kinematics.yaml"/>
   </node>
 </launch>
+```
+
+## Planning Sence 碰撞检测
+
+PlanningScene 提供了主要的接口，我们可以使用接口进行碰撞检测和约束检测
+
+(借助于RobotModel、URDF和SRDF，不推荐使用)
+PlaningSceneMonitor
+
+### 自碰撞检测
+
+首先要进行检测的是机器人目前的状态是否处于机器人的部件相互碰撞的状态。
+我们可以构建一个`CollisionRequest`对象和一个`CollisionResult`对象，将对象作为输入参数放置到碰撞检测函数中。
+自碰撞检测使用的机器人非填充的方式，直接使用URDF文件中提供的模型进行碰撞网格检测
+
+```cpp
+robot_model_loader::RobotModelLoader robot_model_loader("robot_description");
+const moveit::core::RobotModelPtr& kinematic_model = robot_model_loader.getModel();// 获取模型
+planning_scene::PlanningScene planning_scene(kinematic_model);
+
+collision_detection::CollisionRequest collision_request;
+collision_detection::CollisionResult collision_result;
+planning_scene.checkSelfCollision(collision_request, collision_result);
+ROS_INFO_STREAM("Test 1: Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+
+moveit::core::RobotState& current_state = planning_scene.getCurrentStateNonConst();// 获取状态
+// 改变目前机器人的状态
+current_state.setToRandomPositions();
+collision_result.clear();// 清除值
+planning_scene.checkSelfCollision(collision_request, collision_result);
+ROS_INFO_STREAM("Test 2: Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+```
+
+选择其中的一个规划组进行碰撞检测
+
+```cpp
+collision_request.group_name = "panda_hand";// 设置要检测的规划组
+current_state.setToRandomPositions();
+collision_result.clear();
+planning_scene.checkSelfCollision(collision_request, collision_result);
+ROS_INFO_STREAM("Test 3: Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+```
+
+手动设置一组状态检测是否发生自碰撞
+
+```cpp
+std::vector<double> joint_values = { 0.0, 0.0, 0.0, -2.9, 0.0, 1.4, 0.0 };
+const moveit::core::JointModelGroup* joint_model_group = current_state.getJointModelGroup("panda_arm");
+current_state.setJointGroupPositions(joint_model_group, joint_values);
+ROS_INFO_STREAM("Test 4: Current state is " << (current_state.satisfiesBounds(joint_model_group) ? "valid" : "not valid"));
+
+collision_request.contacts = true;
+collision_request.max_contacts = 1000;
+
+collision_result.clear();
+planning_scene.checkSelfCollision(collision_request, collision_result);
+ROS_INFO_STREAM("Test 5: Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+
+collision_detection::CollisionResult::ContactMap::const_iterator it;
+for (it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it)
+{
+  ROS_INFO("Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str());
+}
+```
+
+我们手动设置状态（一组关节角度），同时设置碰撞检测的请求值（contacts bool开启接触点计算模式，告诉检测器即使发生碰撞了也要继续检测，记录下来具体的碰撞信息、max_contacts int存储最大接触点的数量），利用函数`checkSelfCollision`来检测碰撞信息。
+完成检测后，利用迭代器遍历`CollisionResult`的结果`ContactMap`碰撞地图
+
+修改容许碰撞矩阵
+该矩阵规定可以忽略哪些部件之间的碰撞
+
+```cpp
+// 获取碰撞检测矩阵
+collision_detection::AllowedCollisionMatrix acm = planning_scene.getAllowedCollisionMatrix();
+moveit::core::RobotState copied_state = planning_scene.getCurrentState();
+
+collision_detection::CollisionResult::ContactMap::const_iterator it2;
+// 对碰撞检测矩阵进行修改 
+for (it2 = collision_result.contacts.begin(); it2 != collision_result.contacts.end(); ++it2)
+{
+    // 发生碰撞的连杆对
+    acm.setEntry(it2->first.first, it2->first.second, true);
+}
+collision_result.clear();
+planning_scene.checkSelfCollision(collision_request, collision_result, copied_state, acm);
+ROS_INFO_STREAM("Test 6: Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+```
+
+利用前面求解碰撞位置的结果中的碰撞地图，取里面容器的碰撞连杆对，对碰撞检测矩阵设值，即忽略之前检测到的碰撞位置的碰撞
+
+全碰撞检测
+通常使用碰撞版本的机器人与环境进行碰撞检测
+```cpp
+collision_result.clear();
+// 碰撞检测：碰撞请求、结果 检测状态 矩阵
+planning_scene.checkCollision(collision_request, collision_result, copied_state, acm);
+ROS_INFO_STREAM("Test 7: Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+```
+
+
+约束检测
+两种：运动约束，例如位置、角度、速度；另一种则是用户通过回调定义的约束。
+首先定义一个简单的末端执行器的位置姿态，检测一个随机状态是否满足该状态的约束。
+```cpp
+std::string end_effector_name = joint_model_group->getLinkModelNames().back();
+
+geometry_msgs::PoseStamped desired_pose;
+desired_pose.pose.orientation.w = 1.0;
+desired_pose.pose.position.x = 0.3;
+desired_pose.pose.position.y = -0.185;
+desired_pose.pose.position.z = 0.5;
+desired_pose.header.frame_id = "panda_link0";
+moveit_msgs::Constraints goal_constraint =
+    kinematic_constraints::constructGoalConstraints(end_effector_name, desired_pose);
+
+copied_state.setToRandomPositions();
+copied_state.update();// 正向运动学
+// 判断随机状态和目标状态是否相符
+bool constrained = planning_scene.isStateConstrained(copied_state, goal_constraint);
+ROS_INFO_STREAM("Test 8: Random state is " << (constrained ? "constrained" : "not constrained"));
+```
+
+下面介绍一种更加高效的方式
+```cpp
+// 一种更为高效的数据存储方式
+kinematic_constraints::KinematicConstraintSet kinematic_constraint_set(kinematic_model);
+kinematic_constraint_set.add(goal_constraint, planning_scene.getTransforms());
+bool constrained_2 = planning_scene.isStateConstrained(copied_state, kinematic_constraint_set);
+ROS_INFO_STREAM("Test 9: Random state is " << (constrained_2 ? "constrained" : "not constrained"));
+
+kinematic_constraints::ConstraintEvaluationResult constraint_eval_result =
+    kinematic_constraint_set.decide(copied_state);
+ROS_INFO_STREAM("Test 10: Random state is " << (constraint_eval_result.satisfied ? "constrained" : "not constrained"));
+```
+
+为什么这种方式更为高效呢？很明显是采用了一种新的数据类型`kinematic_constraints::KinematicConstraintSet`相对于`moveit_msgs::Constraints`拥有更高的计算性能，原因在于一个存储的是字符串等，一个存储的地址。
+
+| 维度 | `moveit_msgs::Constraints` (消息) | `KinematicConstraintSet` (C++类) |
+| :--- | :--- | :--- |
+| **定位方式** | `std::string link_name = "hand"` | `LinkModel* link = 0x54A0F1` |
+| **查找成本** | **极高** (需要遍历所有连杆进行字符串比对) | **无** (直接解引用指针) |
+| **包含内容** | 只有数据 (x=0.5, y=0.2...) | 数据 + **算法** (Distance(), Check()) |
+| **使用场景** | 这里的电脑传给那里的电脑 (通信) | CPU 疯狂跑循环 (计算) |
+| **比喻** | **菜谱** (文字) | **厨师** (动作) |
+
+用户自定义的约束
+
+我们可以用PlanningScene类去指定自定义的约束函数。
+
+例如以下例子，定义一个函数来检测机器人的状态是否满足关节角度为正。
+
+```cpp
+bool stateFeasibilityTestExample(const moveit::core::RobotState& kinematic_state, bool /*verbose*/)
+{
+  const double* joint_values = kinematic_state.getJointPositions("panda_joint1");
+  return (joint_values[0] > 0.0);
+}
+
+planning_scene.setStateFeasibilityPredicate(stateFeasibilityTestExample);
+bool state_feasible = planning_scene.isStateFeasible(copied_state);
+ROS_INFO_STREAM("Test 11: Random state is " << (state_feasible ? "feasible" : "not feasible"));
+```
+
+同时也可以通过`isStateValid`函数同时完成碰撞检测、约束检测以及自定义的检测
+```cpp
+bool state_valid = planning_scene.isStateValid(copied_state, kinematic_constraint_set, "panda_arm");
+ROS_INFO_STREAM("Test 12: Random state is " << (state_valid ? "valid" : "not valid"));
+```
+
+## Planning Scene Monitor
+
+推荐的方法使用PlanningSceneMonitor
+在使用之前我们先了解一下RobotState, CurrentStateMonitor, PlanningScene, PlanningSceneMonitor, and PlanningSceneInterface 之间的关系
+
+### RobotState
+
+反应机器人的本体状态信息，包括关节角度、正运动学求解的各个连杆的坐标、雅可比矩阵。简而言之，就是包含机器人模型(RobotModel)信息和一组关节角度值。
+
+### CurrentStateMonitor
+
+订阅了各个关节的传感器提供的jointState话题数据，并将这些数据更新到RobotState中的关节值。
+
+### PlanningScene
+
+世界信息的集合，包含world下的机器人信息和各种障碍物的信息。可以通过该类进行碰撞检测或是获取环境信息。
+
+### PlanningSceneMonitor
+
+封装了PlanningScene类与ROS接口，为了访问该类下的PlanningScene，使用提供的 `LockedPlanningSceneRW` 和`LockedPlanningSceneRO`
+并且PlanningSceneMonitor提供了以下的对象，这些对象都有相关的ROS接口用来更新场景对象的数据。
+
+对象：
+**CurrentStateMonitor**：追溯更新RobotState的状态通过`robot_state_subscriber_`和`tf_buffer_`，同时作为`planningScene`话题的订阅者，订阅其他关于场景信息的话题
+**OccupancyMapMonitor** 追溯更新占用地图借助于话题和服务通信
+
+话题：
+**collision_object_subscriber_** 订阅障碍物信息话题(CollisionObject)，可以对向场景添加、删除、修改障碍物
+**planning_scene_world_subscriber_** 订阅规划场景世界话题(PlanningSceneWorld)，包含障碍物信息和八叉树地图信息。
+**attached_collision_object_subscriber_** 订阅附着物话题(AttachedCollisionObject), 对附着物从指定连杆添加或是删除。
+
+服务：
+**get_scene_service_** 
