@@ -3,7 +3,9 @@
 ## rviz过程
 
 通过rviz的插件引入**MotionPlanning**插件。
+
 ![alt text](image.png)
+
 可以发现有图中的很多的设置对象。对图中的设置解释一下：
 
 1. 设置坐标系 Global Options中设置fixed_frame为我们机器人的基坐标系。
@@ -13,6 +15,7 @@
 5. 设置规划请求 planning request设置规划组Planning Group
 
 ### 对机器人的可视化演示
+
 ![alt text](image-1.png)
 
 1. 在scense robot中选择是否展示机器人的场景状态 show robot visual
@@ -21,8 +24,8 @@
 
 在joints部分可以保持末端不变而改变关节空间参数，实现零空间探索。那么什么时零空间探索呢，“Null Space Exploration”（零空间探索）是机器人运动规划和控制中一个非常核心且高级的概念，主要用于冗余机器人。在保持机器人末端执行器（手/夹爪）位置和姿态完全不变的情况下，调整机器人内部关节的角度。
 
-
 ![alt text](image-2.png)
+
 可以通过鼠标拖动来设置start\goal state，也可以通过下拉folder来选择状态，主要分为以下几种：
 
 1. The current state
@@ -34,16 +37,16 @@
 
 在panels中选择MotionPlanning-Slider，添加到rviz中。
 ![alt text](image-3.png)
-
 拖动滑杆可以看到规划中的状态，点击play可以冲滑杆位置，开始演示路径执行的过程。
 
-
 ### 设置速度、加速度
+
 ![alt text](image-4.png)
 
 默认速度、加速度设置的为机器人最大值的10%，我们可以对这个缩放因子进行调整，或者修改我们机器人的最大速度、加速度的设置（在moveit_config中的joint_limit.yaml）
 
 ### 规划过程的分步执行
+
 ![alt text](image-5.png)
 主要借助于moveit_visual_tools工具，在panels中选择RvizVisualToolsGui，将插件加入到rviz中。
 
@@ -104,6 +107,7 @@ visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to continue t
 ### 规划相关的操作
 
 #### **设置规划组、规划场景**
+
 ```cpp
 static const std::string PLANNING_GROUP = "panda_arm";
 moveit::planning_interface::MoveGroupInterface move_group_interface(PLANNING_GROUP);
@@ -112,7 +116,8 @@ const moveit::core::JointModelGroup* joint_model_group =
       move_group_interface.getCurrentState()->getJointModelGroup(PLANNING_GROUP);
 ```
 
-**设置笛卡尔状态（位置+姿态）**
+#### **设置笛卡尔状态（位置+姿态）**
+
 ```cpp
 geometry_msgs::Pose target_pose1;
 target_pose1.orientation.w = 1.0;
@@ -122,7 +127,8 @@ target_pose1.position.z = 0.5;
 move_group_interface.setPoseTarget(target_pose1);
 ```
 
-**设置关节空间状态（一组关节角度）**
+#### **设置关节空间状态（一组关节角度）**
+
 ```cpp
 // 该指针包含 当前位置、速度、加速度
 moveit::core::RobotStatePtr current_state = move_group_interface.getCurrentState();
@@ -132,13 +138,15 @@ joint_group_positions[0] = -tau / 6;  // -1/6 turn in radians
 move_group_interface.setJointValueTarget(joint_group_positions);
 ```
 
-**设置运动参数(设置最大速度\加速度 缩放因子)**
+#### **设置运动参数(设置最大速度\加速度 缩放因子)**
+
 ```cpp
 move_group_interface.setMaxVelocityScalingFactor(0.05);
 move_group_interface.setMaxAccelerationScalingFactor(0.05);
 ```
 
-**执行**
+#### **执行**
+
 ```cpp
 moveit::planning_interface::MoveGroupInterface::Plan my_plan;
 
@@ -151,8 +159,11 @@ move_group_interface.execute(my_plan);
 // 尝试向目标执行
 move_group_interface.move();
 ```
-**运动限制**
+
+#### **运动限制**
+
 让机器人执行路径约束规划之前需要先指定路径约束和目标状态，下面就是定义的路径约束。
+
 ```cpp
 moveit_msgs::OrientationConstraint ocm;
 // 约束link 相对于那个坐标系
@@ -170,7 +181,8 @@ test_constraints.orientation_constraints.push_back(ocm);
 move_group_interface.setPathConstraints(test_constraints);
 ```
 
-**从预设状态开始规划**
+#### **从预设状态开始规划**
+
 ```cpp
 // 存储起始状态（关节、笛卡尔）
 moveit::core::RobotState start_state(*move_group_interface.getCurrentState());
@@ -186,9 +198,11 @@ move_group_interface.setPoseTarget(target_pose1);// 设置目标状态
 move_group_interface.setPlanningTime(10.0);// 规划时间增长
 ```
 
-**笛卡尔路径规划**
+#### **笛卡尔路径规划**
+
 指定笛卡尔路径点（一个列表，存储则末端执行器经过的点）
 需要注意的是笛卡尔运动相对于普通的关节规划，`move_group.setMaxVelocityScalingFactor(0.1);`，也就是我们无法通过这些函数限制速度加速度。原因在于computeCartesianPath 这是一个纯几何的计算，它生成的只是一串密集的空间坐标点（Waypoints），默认并没有包含“什么时间到达哪个点”的信息。也就是生成的路径一开始是没有“速度”概念的。所以我们需要手动给这条几何路径加上时间戳，也就是Trajectory Parameterization（轨迹参数化）。
+
 ```cpp
 std::vector<geometry_msgs::Pose> waypoints;
 waypoints.push_back(start_pose2);
@@ -215,6 +229,7 @@ move_group_interface.execute(trajectory);
 ```
 
 这里除了展示文字、规划轨迹、坐标轴还有路径
+
 ```cpp
 visual_tools.deleteAllMarkers();
 visual_tools.publishText(text_pose, "Cartesian Path", rvt::WHITE, rvt::XLARGE);
@@ -224,6 +239,7 @@ for (std::size_t i = 0; i < waypoints.size(); ++i)
   visual_tools.publishAxisLabeled(waypoints[i], "pt" + std::to_string(i), rvt::SMALL);
 visual_tools.trigger();
 ```
+
 ```cpp
 // 对笛卡尔路径进行修改
 // 先生成几何路径（这一步只得到了一串点，还没有速度信息）
@@ -250,7 +266,8 @@ move_group.execute(my_plan);
 ```
 
 **添加障碍物到规划场景**
-定义障碍物信息，主要用到以下几个数据类型：第一个是`moveit_msgs::CollisionObject`定义的是障碍物的信息，包括**参考坐标系**(header.frame_id)、**名称**(id)、**形状**(primitives)、**位姿**(primitive_poses)、**操作类型**(operation )等。形状使用的数据类型是`shape_msgs::SolidPrimitive `，主要包括类型（type）、参数（dimensions）。位姿使用的数据类型是`geometry_msgs::Pose`
+定义障碍物信息，主要用到以下几个数据类型：第一个是`moveit_msgs::CollisionObject`定义的是障碍物的信息，包括**参考坐标系**(header.frame_id)、**名称**(id)、**形状**(primitives)、**位姿**(primitive_poses)、**操作类型**(operation )等。形状使用的数据类型是`shape_msgs::SolidPrimitive`，主要包括类型（type）、参数（dimensions）。位姿使用的数据类型是`geometry_msgs::Pose`
+
 ```cpp
 moveit_msgs::CollisionObject collision_object;
 collision_object.header.frame_id = move_group_interface.getPlanningFrame();
@@ -287,7 +304,7 @@ planning_scene_interface.addCollisionObjects(collision_objects);
 
 - 运动学绑定，将附着物变为机器人的一部分，跟随机器人进行路径规划，一块进行移动。
 - 修改碰撞检测规则，设置可以碰撞附着物的link列表，避免报错。
- 
+
 ```cpp
 moveit_msgs::CollisionObject object_to_attach;
 object_to_attach.id = "cylinder1";
@@ -314,6 +331,7 @@ move_group_interface.attachObject(object_to_attach.id, "panda_hand", { "panda_le
 
 **场景中物品的移除**
 障碍物亦或是附着物
+
 ```cpp
 move_group_interface.detachObject(object_to_attach.id);
 std::vector<std::string> object_ids;
@@ -327,6 +345,7 @@ planning_scene_interface.removeCollisionObjects(object_ids);
 moveit_commander 是一个python package，在以上的功能进行封装实现上提供了更简单的操作接口（运动规划、抓取放置和笛卡尔路径），需要运行的是moveit_commander功能包下的moveit_commander_cmdline.py程序。
 
 进入程序后，我们可以输入一些简单的指令来控制机器人移动。语言类似于MATLAB。
+
 ```MATLAB
 use panda_arm # 指定运动规划组
 current # 获取当前状态
@@ -370,6 +389,7 @@ for (std::size_t i = 0; i < joint_names.size(); ++i)
 ```
 
 设置角度，主要借助于`setJointGroupPositions`函数，但是该函数不会考虑角度是否越界，这时候需要`satisfiesBounds`来判断是否状态有效，同时可以使用`enforceBounds`函数强制将数据按回安全范围内。
+
 ```cpp
 /* Set one joint in the Panda arm outside its joint limit */
 joint_values[0] = 5.57;
@@ -384,6 +404,7 @@ ROS_INFO_STREAM("Current state is " << (kinematic_state->satisfiesBounds() ? "va
 ```
 
 前向运动学，计算末端执行器的笛卡尔空间的值，
+
 ```cpp
 kinematic_state->setToRandomPositions(joint_model_group);
 const Eigen::Isometry3d& end_effector_state = kinematic_state->getGlobalLinkTransform("panda_link8");
@@ -394,6 +415,7 @@ ROS_INFO_STREAM("Rotation: \n" << end_effector_state.rotation() << "\n");
 ```
 
 逆向运动学，需要末端执行器的位姿基于计算的最大时间。
+
 ```cpp
 double timeout = 0.1;
 bool found_ik = kinematic_state->setFromIK(joint_model_group, end_effector_state, timeout);
@@ -412,6 +434,7 @@ else
 ```
 
 雅可比矩阵
+
 ```cpp
 Eigen::Vector3d reference_point_position(0.0, 0.0, 0.0);// 参考方向
 Eigen::MatrixXd jacobian;
@@ -445,7 +468,7 @@ launch文件
 PlanningScene 提供了主要的接口，我们可以使用接口进行碰撞检测和约束检测
 
 (借助于RobotModel、URDF和SRDF，不推荐使用)
-PlaningSceneMonitor
+推荐使用后面的PlaningSceneMonitor对象
 
 ### 自碰撞检测
 
@@ -455,11 +478,14 @@ PlaningSceneMonitor
 
 ```cpp
 robot_model_loader::RobotModelLoader robot_model_loader("robot_description");
-const moveit::core::RobotModelPtr& kinematic_model = robot_model_loader.getModel();// 获取模型
+// 获取模型
+const moveit::core::RobotModelPtr& kinematic_model = robot_model_loader.getModel();
+// 利用模型构造PlanningScene对象
 planning_scene::PlanningScene planning_scene(kinematic_model);
 
 collision_detection::CollisionRequest collision_request;
 collision_detection::CollisionResult collision_result;
+// 这里是自检测函数 有函数重载 默认检测robotState所处的状态
 planning_scene.checkSelfCollision(collision_request, collision_result);
 ROS_INFO_STREAM("Test 1: Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
 
@@ -530,6 +556,7 @@ ROS_INFO_STREAM("Test 6: Current state is " << (collision_result.collision ? "in
 
 全碰撞检测
 通常使用碰撞版本的机器人与环境进行碰撞检测
+
 ```cpp
 collision_result.clear();
 // 碰撞检测：碰撞请求、结果 检测状态 矩阵
@@ -537,10 +564,10 @@ planning_scene.checkCollision(collision_request, collision_result, copied_state,
 ROS_INFO_STREAM("Test 7: Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
 ```
 
-
 约束检测
 两种：运动约束，例如位置、角度、速度；另一种则是用户通过回调定义的约束。
-首先定义一个简单的末端执行器的位置姿态，检测一个随机状态是否满足该状态的约束。
+首先定义一个简单的末端执行器的位置姿态，检测一个随机状态是否满足该状态的约束。第一种这里使用的是位置约束检测，其实就是检测两个状态的相符情况，可以发现的是这里使用的是`isStateConstrained`来检测两个状态的相符情况。
+
 ```cpp
 std::string end_effector_name = joint_model_group->getLinkModelNames().back();
 
@@ -561,6 +588,7 @@ ROS_INFO_STREAM("Test 8: Random state is " << (constrained ? "constrained" : "no
 ```
 
 下面介绍一种更加高效的方式
+
 ```cpp
 // 一种更为高效的数据存储方式
 kinematic_constraints::KinematicConstraintSet kinematic_constraint_set(kinematic_model);
@@ -585,7 +613,7 @@ ROS_INFO_STREAM("Test 10: Random state is " << (constraint_eval_result.satisfied
 
 用户自定义的约束
 
-我们可以用PlanningScene类去指定自定义的约束函数。
+我们可以用PlanningScene类去指定自定义的约束函数。可以看到这里是用`setStateFeasibilityPredicate`设置自定义的函数，使用`isStateFeasible`来检测是否满足约束
 
 例如以下例子，定义一个函数来检测机器人的状态是否满足关节角度为正。
 
@@ -602,6 +630,7 @@ ROS_INFO_STREAM("Test 11: Random state is " << (state_feasible ? "feasible" : "n
 ```
 
 同时也可以通过`isStateValid`函数同时完成碰撞检测、约束检测以及自定义的检测
+
 ```cpp
 bool state_valid = planning_scene.isStateValid(copied_state, kinematic_constraint_set, "panda_arm");
 ROS_INFO_STREAM("Test 12: Random state is " << (state_valid ? "valid" : "not valid"));
@@ -639,4 +668,534 @@ ROS_INFO_STREAM("Test 12: Random state is " << (state_valid ? "valid" : "not val
 **attached_collision_object_subscriber_** 订阅附着物话题(AttachedCollisionObject), 对附着物从指定连杆添加或是删除。
 
 服务：
-**get_scene_service_** 
+**get_scene_service_**
+
+```cpp
+ros::init(argc, argv, "motion_planning_tutorial");
+ros::AsyncSpinner spinner(1);
+spinner.start();
+ros::NodeHandle node_handle("~");
+
+const std::string PLANNING_GROUP = "arm";
+robot_model_loader::RobotModelLoader robot_model_loader("robot_description");
+const moveit::core::RobotModelPtr& robot_model = robot_model_loader.getModel();//RobotModel
+
+/* RobotState和JointModelGroup追溯当前状态 */
+moveit::core::RobotStatePtr robot_state(new moveit::core::RobotState(robot_model));//RobotState
+const moveit::core::JointModelGroup* joint_model_group = robot_state->getJointModelGroup(PLANNING_GROUP);
+
+// 构造一个用于规划的场景
+planning_scene::PlanningScenePtr planning_scene(new planning_scene::PlanningScene(robot_model));
+
+// 设置一个有效的状态 这里设置srdf中一个位置zero
+planning_scene->getCurrentStateNonConst().setToDefaultValues(joint_model_group, "zero");
+
+// 利用插件加载一个规划器
+// 插件查询、规划器实例、规划器名称
+boost::scoped_ptr<pluginlib::ClassLoader<planning_interface::PlannerManager>> planner_plugin_loader;
+planning_interface::PlannerManagerPtr planner_instance;
+std::string planner_plugin_name;
+
+// 从参数服务器中查找插件的名称
+if (!node_handle.getParam("planning_plugin", planner_plugin_name))
+ROS_FATAL_STREAM("Could not find planner plugin name");
+try
+{
+  // 查找相应的功能包下的规划器
+  planner_plugin_loader.reset(new pluginlib::ClassLoader<planning_interface::PlannerManager>(
+      "moveit_core", "planning_interface::PlannerManager"));
+}
+catch (pluginlib::PluginlibException& ex)
+{
+  ROS_FATAL_STREAM("Exception while creating planning plugin loader " << ex.what());
+}
+try
+{
+  // 创建实例化的规划器
+  planner_instance.reset(planner_plugin_loader->createUnmanagedInstance(planner_plugin_name));
+  if (!planner_instance->initialize(robot_model, node_handle.getNamespace()))
+    ROS_FATAL_STREAM("Could not initialize planner instance");
+  ROS_INFO_STREAM("Using planning interface '" << planner_instance->getDescription() << "'");
+}
+catch (pluginlib::PluginlibException& ex)
+{
+  const std::vector<std::string>& classes = planner_plugin_loader->getDeclaredClasses();
+  std::stringstream ss;
+  for (const auto& cls : classes)
+    ss << cls << " ";
+  ROS_ERROR_STREAM("Exception while loading planner '" << planner_plugin_name << "': " << ex.what() << std::endl
+                                                        << "Available plugins: " << ss.str());
+}
+```
+
+以上操作就是前期构造阶段，最基本的节点和线程初始化就不说了，然后就是利用`RobotModelLoader`去获取参数服务器中的URDF机器人模型，然后我们既然要规划那必然需要一个空间，所以需要构造一个`PlanningScene`类型，该数据包含机器人的状态、障碍物信息等。然后我们需要构造一个规划器，构造这个规划器首先需要我们创建一个插件搜索一个对象对当前相关的插件进行搜索，根据搜索结果和期望的规划器名称构建一个规划器实例。
+
+```cpp
+// 实例化rviz可视化对象 发布对应的状态话题 将机器人的状态可视化显示
+namespace rvt = rviz_visual_tools;
+moveit_visual_tools::MoveItVisualTools visual_tools("base_link");
+visual_tools.loadRobotStatePub("/display_robot_state");// 设置话题
+visual_tools.enableBatchPublishing();// 批量化加载
+visual_tools.deleteAllMarkers();
+visual_tools.trigger();
+
+/* 通过rviz 工具控制过程 */
+visual_tools.loadRemoteControl();
+
+/* 设置文字显示的位置 */
+Eigen::Isometry3d text_pose = Eigen::Isometry3d::Identity();
+text_pose.translation().z() = 1.75;
+visual_tools.publishText(text_pose, "Motion Planning API Demo", rvt::WHITE, rvt::XLARGE);
+
+/* 加载到rviz中 */
+visual_tools.trigger();
+
+/* We can also use visual_tools to wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to start the demo");
+
+visual_tools.trigger();
+```
+
+构造一个rviz可视化对象
+
+```cpp
+// Pose Goal 设置目标位置
+planning_interface::MotionPlanRequest req;
+planning_interface::MotionPlanResponse res;
+geometry_msgs::PoseStamped pose;
+pose.header.frame_id = "base_link";
+pose.pose.position.x = 0.3;
+pose.pose.position.y = 0.4;
+pose.pose.position.z = 0.75;
+pose.pose.orientation.w = 1.0;
+
+// 设置容许误差
+std::vector<double> tolerance_pose(3, 0.01);
+std::vector<double> tolerance_angle(3, 0.01);
+
+// 创建一个约束 goal_constraints
+moveit_msgs::Constraints pose_goal =
+    kinematic_constraints::constructGoalConstraints("wrist3_Link", pose, tolerance_pose, tolerance_angle);
+
+req.group_name = PLANNING_GROUP;
+req.goal_constraints.push_back(pose_goal);
+
+// 创建一个规划的场景环境
+planning_interface::PlanningContextPtr context =
+    planner_instance->getPlanningContext(planning_scene, req, res.error_code_);
+context->solve(res);
+if (res.error_code_.val != res.error_code_.SUCCESS)
+{
+  ROS_ERROR("Could not compute plan successfully");
+  return 0;
+}
+
+// 将结果发布
+ros::Publisher display_publisher =
+    node_handle.advertise<moveit_msgs::DisplayTrajectory>("/move_group/display_planned_path", 1, true);
+moveit_msgs::DisplayTrajectory display_trajectory;
+
+/* Visualize the trajectory */
+moveit_msgs::MotionPlanResponse response;
+res.getMessage(response);
+
+display_trajectory.trajectory_start = response.trajectory_start;
+display_trajectory.trajectory.push_back(response.trajectory);
+visual_tools.publishTrajectoryLine(display_trajectory.trajectory.back(), joint_model_group);
+visual_tools.trigger();
+display_publisher.publish(display_trajectory);
+
+/* Set the state in the planning scene to the final state of the last plan */
+robot_state->setJointGroupPositions(joint_model_group, response.trajectory.joint_trajectory.points.back().positions);
+planning_scene->setCurrentState(*robot_state.get());
+
+// Display the goal state
+visual_tools.publishRobotState(planning_scene->getCurrentStateNonConst(), rviz_visual_tools::GREEN);
+visual_tools.publishAxisLabeled(pose.pose, "goal_1");
+visual_tools.publishText(text_pose, "Pose Goal (1)", rvt::WHITE, rvt::XLARGE);
+visual_tools.trigger();
+
+/* We can also use visual_tools to wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to continue the demo");
+
+// 关节空间设置目标
+moveit::core::RobotState goal_state(robot_model);
+std::vector<double> joint_values = { -1.0, 0.7, 0.7, -1.5, -0.7, 2.0 };
+goal_state.setJointGroupPositions(joint_model_group, joint_values);
+moveit_msgs::Constraints joint_goal = kinematic_constraints::constructGoalConstraints(goal_state, joint_model_group);
+req.goal_constraints.clear();
+req.goal_constraints.push_back(joint_goal);
+
+// 构建新的规划场景配置
+context = planner_instance->getPlanningContext(planning_scene, req, res.error_code_);
+/* Call the Planner */
+context->solve(res);
+/* Check that the planning was successful */
+if (res.error_code_.val != res.error_code_.SUCCESS)
+{
+  ROS_ERROR("Could not compute plan successfully");
+  return 0;
+}
+/* Visualize the trajectory */
+res.getMessage(response);
+display_trajectory.trajectory.push_back(response.trajectory);
+
+/* Now you should see two planned trajectories in series*/
+visual_tools.publishTrajectoryLine(display_trajectory.trajectory.back(), joint_model_group);
+visual_tools.trigger();
+display_publisher.publish(display_trajectory);
+
+/* 设置新的位置 规划后路径的最后一个点 */
+robot_state->setJointGroupPositions(joint_model_group, response.trajectory.joint_trajectory.points.back().positions);
+planning_scene->setCurrentState(*robot_state.get());
+
+// Display the goal state
+visual_tools.publishRobotState(planning_scene->getCurrentStateNonConst(), rviz_visual_tools::GREEN);
+visual_tools.publishAxisLabeled(pose.pose, "goal_2");
+visual_tools.publishText(text_pose, "Joint Space Goal (2)", rvt::WHITE, rvt::XLARGE);
+visual_tools.trigger();
+
+/* Wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to continue the demo");
+
+/* 现在我们退回至原来规划中的第一个位置 */
+req.goal_constraints.clear();
+req.goal_constraints.push_back(pose_goal);
+context = planner_instance->getPlanningContext(planning_scene, req, res.error_code_);
+context->solve(res);
+res.getMessage(response);
+
+display_trajectory.trajectory.push_back(response.trajectory);
+visual_tools.publishTrajectoryLine(display_trajectory.trajectory.back(), joint_model_group);
+visual_tools.trigger();
+display_publisher.publish(display_trajectory);
+
+/* Set the state in the planning scene to the final state of the last plan */
+robot_state->setJointGroupPositions(joint_model_group, response.trajectory.joint_trajectory.points.back().positions);
+planning_scene->setCurrentState(*robot_state.get());
+
+// Display the goal state
+visual_tools.publishRobotState(planning_scene->getCurrentStateNonConst(), rviz_visual_tools::GREEN);
+visual_tools.trigger();
+
+/* Wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to continue the demo");
+
+// 设置新的目标位置
+
+pose.pose.position.x = 0.32;
+pose.pose.position.y = -0.25;
+pose.pose.position.z = 0.65;
+pose.pose.orientation.w = 1.0;
+moveit_msgs::Constraints pose_goal_2 =
+    kinematic_constraints::constructGoalConstraints("wrist3_Link", pose, tolerance_pose, tolerance_angle);
+
+/* Now, let's try to move to this new pose goal*/
+req.goal_constraints.clear();
+req.goal_constraints.push_back(pose_goal_2);
+
+/* 对路径加入新的约束要求 path_constraints */
+geometry_msgs::QuaternionStamped quaternion;
+quaternion.header.frame_id = "base_link";
+quaternion.quaternion.w = 1.0;
+req.path_constraints = kinematic_constraints::constructGoalConstraints("wrist3_Link", quaternion);
+
+// Imposing path constraints requires the planner to reason in the space of possible positions of the end-effector
+// (the workspace of the robot)
+// because of this, we need to specify a bound for the allowed planning volume as well;
+// Note: a default bound is automatically filled by the WorkspaceBounds request adapter (part of the OMPL pipeline,
+// but that is not being used in this example).
+// We use a bound that definitely includes the reachable space for the arm. This is fine because sampling is not done
+// in this volume
+// when planning for the arm; the bounds are only used to determine if the sampled configurations are valid.
+req.workspace_parameters.min_corner.x = req.workspace_parameters.min_corner.y =
+    req.workspace_parameters.min_corner.z = -2.0;
+req.workspace_parameters.max_corner.x = req.workspace_parameters.max_corner.y =
+    req.workspace_parameters.max_corner.z = 2.0;
+
+// Call the planner and visualize all the plans created so far.
+context = planner_instance->getPlanningContext(planning_scene, req, res.error_code_);
+context->solve(res);
+res.getMessage(response);
+display_trajectory.trajectory.push_back(response.trajectory);
+visual_tools.publishTrajectoryLine(display_trajectory.trajectory.back(), joint_model_group);
+visual_tools.trigger();
+display_publisher.publish(display_trajectory);
+
+/* Set the state in the planning scene to the final state of the last plan */
+robot_state->setJointGroupPositions(joint_model_group, response.trajectory.joint_trajectory.points.back().positions);
+planning_scene->setCurrentState(*robot_state.get());
+
+// Display the goal state
+visual_tools.publishRobotState(planning_scene->getCurrentStateNonConst(), rviz_visual_tools::GREEN);
+visual_tools.publishAxisLabeled(pose.pose, "goal_3");
+visual_tools.publishText(text_pose, "Orientation Constrained Motion Plan (3)", rvt::WHITE, rvt::XLARGE);
+visual_tools.trigger();
+
+// END_TUTORIAL
+/* Wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to exit the demo");
+planner_instance.reset();
+
+```
+
+## Motion Planning
+
+介绍一下从插件中加载一个规划器进行路径规划
+
+```cpp
+
+ros::init(argc, argv, "motion_planning_tutorial");
+ros::AsyncSpinner spinner(1);
+spinner.start();
+ros::NodeHandle node_handle("~");
+
+const std::string PLANNING_GROUP = "arm";
+robot_model_loader::RobotModelLoader robot_model_loader("robot_description");
+const moveit::core::RobotModelPtr& robot_model = robot_model_loader.getModel();//RobotModel
+  
+/* Create a RobotState and JointModelGroup to keep track of the current robot pose and planning group */
+moveit::core::RobotStatePtr robot_state(new moveit::core::RobotState(robot_model));//RobotState
+const moveit::core::JointModelGroup* joint_model_group = robot_state->getJointModelGroup(PLANNING_GROUP);
+planning_scene::PlanningScenePtr planning_scene(new planning_scene::PlanningScene(robot_model));
+
+// 设置一个有效的状态 这里设置srdf中一个位置zero
+planning_scene->getCurrentStateNonConst().setToDefaultValues(joint_model_group, "zero");
+
+// 利用插件加载一个规划器
+boost::scoped_ptr<pluginlib::ClassLoader<planning_interface::PlannerManager>> planner_plugin_loader;
+planning_interface::PlannerManagerPtr planner_instance;
+std::string planner_plugin_name;
+
+// 从参数服务器中查找插件的名称
+if (!node_handle.getParam("planning_plugin", planner_plugin_name))
+ROS_FATAL_STREAM("Could not find planner plugin name");
+try
+{
+// 查找相应的功能包下的规划器
+planner_plugin_loader.reset(new pluginlib::ClassLoader<planning_interface::PlannerManager>(
+    "moveit_core", "planning_interface::PlannerManager"));
+}
+catch (pluginlib::PluginlibException& ex)
+{
+ROS_FATAL_STREAM("Exception while creating planning plugin loader " << ex.what());
+}
+try
+{
+// 创建实例化的规划器
+planner_instance.reset(planner_plugin_loader->createUnmanagedInstance(planner_plugin_name));
+if (!planner_instance->initialize(robot_model, node_handle.getNamespace()))
+  ROS_FATAL_STREAM("Could not initialize planner instance");
+ROS_INFO_STREAM("Using planning interface '" << planner_instance->getDescription() << "'");
+}
+catch (pluginlib::PluginlibException& ex)
+{
+const std::vector<std::string>& classes = planner_plugin_loader->getDeclaredClasses();
+std::stringstream ss;
+for (const auto& cls : classes)
+  ss << cls << " ";
+ROS_ERROR_STREAM("Exception while loading planner '" << planner_plugin_name << "': " << ex.what() << std::endl
+                                                      << "Available plugins: " << ss.str());
+}
+
+// 实例化rviz可视化对象 发布对应的状态话题 将机器人的状态可视化显示
+namespace rvt = rviz_visual_tools;
+moveit_visual_tools::MoveItVisualTools visual_tools("base_link");
+visual_tools.loadRobotStatePub("/display_robot_state");// 设置话题
+visual_tools.enableBatchPublishing();// 批量化加载
+visual_tools.deleteAllMarkers();  // clear all old markers
+visual_tools.trigger();
+
+/* 通过rviz 工具控制过程 */
+visual_tools.loadRemoteControl();
+
+/* 设置文字显示的位置 */
+Eigen::Isometry3d text_pose = Eigen::Isometry3d::Identity();
+text_pose.translation().z() = 1.75;
+visual_tools.publishText(text_pose, "Motion Planning API Demo", rvt::WHITE, rvt::XLARGE);
+
+/* 加载到rviz中 */
+visual_tools.trigger();
+
+/* We can also use visual_tools to wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to start the demo");
+
+// Pose Goal 设置目标位置
+visual_tools.trigger();
+planning_interface::MotionPlanRequest req;
+planning_interface::MotionPlanResponse res;
+geometry_msgs::PoseStamped pose;
+pose.header.frame_id = "base_link";
+pose.pose.position.x = 0.3;
+pose.pose.position.y = 0.4;
+pose.pose.position.z = 0.75;
+pose.pose.orientation.w = 1.0;
+
+// 设置容许误差
+std::vector<double> tolerance_pose(3, 0.01);
+std::vector<double> tolerance_angle(3, 0.01);
+
+// 创建一个约束 goal_constraints
+moveit_msgs::Constraints pose_goal =
+  kinematic_constraints::constructGoalConstraints("wrist3_Link", pose, tolerance_pose, tolerance_angle);
+
+req.group_name = PLANNING_GROUP;
+req.goal_constraints.push_back(pose_goal);
+
+// 创建一个规划的场景环境
+planning_interface::PlanningContextPtr context =
+  planner_instance->getPlanningContext(planning_scene, req, res.error_code_);
+context->solve(res);
+if (res.error_code_.val != res.error_code_.SUCCESS)
+{
+ROS_ERROR("Could not compute plan successfully");
+return 0;
+}
+
+// 将结果发布
+ros::Publisher display_publisher =
+  node_handle.advertise<moveit_msgs::DisplayTrajectory>("/move_group/display_planned_path", 1, true);
+moveit_msgs::DisplayTrajectory display_trajectory;
+
+/* Visualize the trajectory */
+moveit_msgs::MotionPlanResponse response;
+res.getMessage(response);
+
+display_trajectory.trajectory_start = response.trajectory_start;
+display_trajectory.trajectory.push_back(response.trajectory);
+visual_tools.publishTrajectoryLine(display_trajectory.trajectory.back(), joint_model_group);
+visual_tools.trigger();
+display_publisher.publish(display_trajectory);
+
+/* Set the state in the planning scene to the final state of the last plan */
+robot_state->setJointGroupPositions(joint_model_group, response.trajectory.joint_trajectory.points.back().positions);
+planning_scene->setCurrentState(*robot_state.get());
+
+// Display the goal state
+visual_tools.publishRobotState(planning_scene->getCurrentStateNonConst(), rviz_visual_tools::GREEN);
+visual_tools.publishAxisLabeled(pose.pose, "goal_1");
+visual_tools.publishText(text_pose, "Pose Goal (1)", rvt::WHITE, rvt::XLARGE);
+visual_tools.trigger();
+
+/* We can also use visual_tools to wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to continue the demo");
+
+// 关节空间设置目标
+moveit::core::RobotState goal_state(robot_model);
+std::vector<double> joint_values = { -1.0, 0.7, 0.7, -1.5, -0.7, 2.0 };
+goal_state.setJointGroupPositions(joint_model_group, joint_values);
+moveit_msgs::Constraints joint_goal = kinematic_constraints::constructGoalConstraints(goal_state, joint_model_group);
+req.goal_constraints.clear();
+req.goal_constraints.push_back(joint_goal);
+
+// 构建新的规划场景配置
+context = planner_instance->getPlanningContext(planning_scene, req, res.error_code_);
+/* Call the Planner */
+context->solve(res);
+/* Check that the planning was successful */
+if (res.error_code_.val != res.error_code_.SUCCESS)
+{
+ROS_ERROR("Could not compute plan successfully");
+return 0;
+}
+/* Visualize the trajectory */
+res.getMessage(response);
+display_trajectory.trajectory.push_back(response.trajectory);
+
+/* Now you should see two planned trajectories in series*/
+visual_tools.publishTrajectoryLine(display_trajectory.trajectory.back(), joint_model_group);
+visual_tools.trigger();
+display_publisher.publish(display_trajectory);
+
+/* 设置新的位置 规划后路径的最后一个点 */
+robot_state->setJointGroupPositions(joint_model_group, response.trajectory.joint_trajectory.points.back().positions);
+planning_scene->setCurrentState(*robot_state.get());
+
+// Display the goal state
+visual_tools.publishRobotState(planning_scene->getCurrentStateNonConst(), rviz_visual_tools::GREEN);
+visual_tools.publishAxisLabeled(pose.pose, "goal_2");
+visual_tools.publishText(text_pose, "Joint Space Goal (2)", rvt::WHITE, rvt::XLARGE);
+visual_tools.trigger();
+
+/* Wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to continue the demo");
+
+/* 现在我们退回至原来规划中的第一个位置 */
+req.goal_constraints.clear();
+req.goal_constraints.push_back(pose_goal);
+context = planner_instance->getPlanningContext(planning_scene, req, res.error_code_);
+context->solve(res);
+res.getMessage(response);
+
+display_trajectory.trajectory.push_back(response.trajectory);
+visual_tools.publishTrajectoryLine(display_trajectory.trajectory.back(), joint_model_group);
+visual_tools.trigger();
+display_publisher.publish(display_trajectory);
+
+/* Set the state in the planning scene to the final state of the last plan */
+robot_state->setJointGroupPositions(joint_model_group, response.trajectory.joint_trajectory.points.back().positions);
+planning_scene->setCurrentState(*robot_state.get());
+
+// Display the goal state
+visual_tools.publishRobotState(planning_scene->getCurrentStateNonConst(), rviz_visual_tools::GREEN);
+visual_tools.trigger();
+
+/* Wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to continue the demo");
+
+// 设置新的目标位置
+
+pose.pose.position.x = 0.32;
+pose.pose.position.y = -0.25;
+pose.pose.position.z = 0.65;
+pose.pose.orientation.w = 1.0;
+moveit_msgs::Constraints pose_goal_2 =
+  kinematic_constraints::constructGoalConstraints("wrist3_Link", pose, tolerance_pose, tolerance_angle);
+
+/* Now, let's try to move to this new pose goal*/
+req.goal_constraints.clear();
+req.goal_constraints.push_back(pose_goal_2);
+
+/* 对路径加入新的约束要求 path_constraints */
+geometry_msgs::QuaternionStamped quaternion;
+quaternion.header.frame_id = "base_link";
+quaternion.quaternion.w = 1.0;
+req.path_constraints = kinematic_constraints::constructGoalConstraints("wrist3_Link", quaternion);
+
+// Imposing path constraints requires the planner to reason in the space of possible positions of the end-effector
+// (the workspace of the robot)
+// because of this, we need to specify a bound for the allowed planning volume as well;
+// Note: a default bound is automatically filled by the WorkspaceBounds request adapter (part of the OMPL pipeline,
+// but that is not being used in this example).
+// We use a bound that definitely includes the reachable space for the arm. This is fine because sampling is not done
+// in this volume
+// when planning for the arm; the bounds are only used to determine if the sampled configurations are valid.
+req.workspace_parameters.min_corner.x = req.workspace_parameters.min_corner.y =
+  req.workspace_parameters.min_corner.z = -2.0;
+req.workspace_parameters.max_corner.x = req.workspace_parameters.max_corner.y =
+  req.workspace_parameters.max_corner.z = 2.0;
+
+// Call the planner and visualize all the plans created so far.
+context = planner_instance->getPlanningContext(planning_scene, req, res.error_code_);
+context->solve(res);
+res.getMessage(response);
+display_trajectory.trajectory.push_back(response.trajectory);
+visual_tools.publishTrajectoryLine(display_trajectory.trajectory.back(), joint_model_group);
+visual_tools.trigger();
+display_publisher.publish(display_trajectory);
+
+/* Set the state in the planning scene to the final state of the last plan */
+robot_state->setJointGroupPositions(joint_model_group, response.trajectory.joint_trajectory.points.back().positions);
+planning_scene->setCurrentState(*robot_state.get());
+
+// Display the goal state
+visual_tools.publishRobotState(planning_scene->getCurrentStateNonConst(), rviz_visual_tools::GREEN);
+visual_tools.publishAxisLabeled(pose.pose, "goal_3");
+visual_tools.publishText(text_pose, "Orientation Constrained Motion Plan (3)", rvt::WHITE, rvt::XLARGE);
+visual_tools.trigger();
+
+// END_TUTORIAL
+/* Wait for user input */
+visual_tools.prompt("Press 'next' in the RvizVisualToolsGui window to exit the demo");
+planner_instance.reset();
+```
